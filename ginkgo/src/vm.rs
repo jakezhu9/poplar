@@ -3,11 +3,12 @@ use core::{cmp, fmt};
 use std::collections::BTreeMap;
 
 macro_rules! opcodes {
-    { $($opcode:literal => $name:ident $(,)*)* } => {
+    { $($(#[$($attrss:meta)*])* $opcode:literal => $name:ident $(,)*)* } => {
         #[derive(Clone, Copy, PartialEq, Debug)]
         #[repr(u8)]
         pub enum Opcode {
             $(
+                $(#[$($attrss)*])*
                 $name = $opcode,
              )*
         }
@@ -29,13 +30,16 @@ macro_rules! opcodes {
 
 opcodes! {
     0 => Return,
+    /// Push a constant onto the stack. Followed by a single-byte operand which is the index into the chunk's constant table.
     1 => Constant,
     2 => Negate,
     3 => Add,
     4 => Subtract,
     5 => Multiply,
     6 => Divide,
+    /// Push a `true` boolean value onto the stack.
     7 => True,
+    /// Push a `false` boolean value onto the stack.
     8 => False,
     9 => BitwiseAnd,
     10 => BitwiseOr,
@@ -75,6 +79,10 @@ impl Chunk {
         let index = self.constants.len();
         self.constants.push(value);
         index
+    }
+
+    pub fn pop_last(&mut self) -> Option<u8> {
+        self.code.pop()
     }
 
     pub fn pop_last_op(&mut self) -> Option<Opcode> {
@@ -146,8 +154,8 @@ impl fmt::Debug for Chunk {
                 Opcode::GreaterEqual => decompile!("GreaterEqual"),
                 Opcode::Pop => decompile!("Pop"),
                 Opcode::DefineGlobal => decompile!("DefineGlobal"),
-                Opcode::GetGlobal => decompile!("GetGlobal"),
-                Opcode::SetGlobal => decompile!("SetGlobal"),
+                Opcode::GetGlobal => decompile!("GetGlobal", constant),
+                Opcode::SetGlobal => decompile!("SetGlobal", constant),
                 Opcode::GetLocal => decompile!("GetLocal", operand),
                 Opcode::SetLocal => decompile!("SetLocal", operand),
                 Opcode::Jump => decompile!("Jump", jump_operand),
@@ -160,7 +168,7 @@ impl fmt::Debug for Chunk {
 }
 
 pub struct Vm {
-    stack: Vec<Value>,
+    pub stack: Vec<Value>,
     chunk: Option<Chunk>,
     ip: usize,
 
@@ -227,8 +235,9 @@ impl Vm {
                     self.globals.insert(name, value);
                 }
                 Opcode::GetGlobal => {
+                    let index = self.next() as usize;
                     let name = {
-                        let name = self.stack.pop().unwrap();
+                        let name = self.chunk.as_ref().unwrap().constants.get(index).unwrap();
                         let name = unsafe { name.as_obj::<GinkgoString>().unwrap() };
                         name.as_str().to_string()
                     };
@@ -236,9 +245,10 @@ impl Vm {
                     self.stack.push(value);
                 }
                 Opcode::SetGlobal => {
+                    let index = self.next() as usize;
                     let value = self.stack.pop().unwrap();
                     let name = {
-                        let name = self.stack.pop().unwrap();
+                        let name = self.chunk.as_ref().unwrap().constants.get(index).unwrap();
                         let name = unsafe { name.as_obj::<GinkgoString>().unwrap() };
                         name.as_str().to_string()
                     };
